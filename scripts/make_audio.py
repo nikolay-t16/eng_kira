@@ -6,6 +6,8 @@ blending s-a-t matches "sat". A few dictionary pronunciations are overridden
 where espeak would teach the wrong vowel (on, log, the article "a").
 """
 
+import math
+import random
 import re
 import struct
 import subprocess
@@ -17,6 +19,32 @@ ROOT = Path(__file__).resolve().parents[1]
 PH_DIR = ROOT / "audio" / "p"
 WORD_DIR = ROOT / "audio" / "w"
 SENT_DIR = ROOT / "audio" / "s"
+HYPE_DIR = ROOT / "audio" / "hype"
+
+# Cheers after a finished step. Spoken by a higher voice than the lessons,
+# and never shown as text. Ids must match the HYPE list in js/app.js.
+# speed, pitch (0-99), line.
+HYPE = [
+    ("damn", 148, 72, "Damn, girl."),
+    ("legend", 136, 78, "Fucking legend."),
+    ("omg", 168, 84, "Oh my god!"),
+    ("ate", 146, 66, "You ate that."),
+    ("slay", 154, 76, "Okay, slay."),
+    ("iconic", 138, 64, "That was iconic."),
+    ("queen", 144, 74, "Alright, queen."),
+    ("insane", 160, 80, "That is insane."),
+    ("see-you", 132, 56, "Okay. I see you."),
+    ("no-way", 172, 86, "No way!"),
+    ("period", 116, 48, "Period."),
+    ("main", 142, 68, "Main character."),
+    ("clean", 150, 70, "So clean."),
+    ("respect", 122, 46, "Respect."),
+    ("wait", 156, 73, "Wait. She did that."),
+    ("fire", 158, 77, "That's fire."),
+    ("screaming", 166, 88, "I am screaming."),
+    ("unreal", 148, 70, "Unreal."),
+    ("mrrp", 132, 30, "Mrrp. Mrrp."),
+]
 
 # espeak-ng phoneme inside [[ ]]. Short i must be stressed ('I), or the
 # voice says the letter name. r- is the English approximant, not a trill.
@@ -390,23 +418,30 @@ def synth_phoneme(key, dest):
         sys.exit(f"phoneme {key} is still too quiet: peak={peak} span={span:.3f}s")
 
 
-def synth(spec, dest, speed):
+def build_purr():
+    """A short cat purr: a buzz, pulsed about 26 times a second."""
+    rng = random.Random(11)
+    seconds = 1.7
+    count = int(seconds * RATE)
+    samples = []
+    for index in range(count):
+        t = index / RATE
+        cycle = (t * 1.35) % 1.0
+        f0 = 175 if cycle < 0.55 else 142
+        trem = 0.28 + 0.72 * (0.5 + 0.5 * math.sin(2 * math.pi * 26 * t))
+        buzz = (
+            math.sin(2 * math.pi * f0 * t)
+            + 0.5 * math.sin(2 * math.pi * f0 * 2 * t)
+            + 0.22 * math.sin(2 * math.pi * f0 * 3 * t)
+        )
+        noise = rng.uniform(-1, 1) * (0.28 if cycle < 0.55 else 0.12)
+        edge = min(1.0, t / 0.05, (seconds - t) / 0.1)
+        samples.append((buzz * 0.84 + noise) * trem * edge)
+    return fade_edges(normalize(samples), 0.04)
+
+
+def to_mp3(wav, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
-    wav = dest.with_suffix(".wav")
-    run(
-        [
-            "espeak-ng",
-            "-v",
-            "en-us",
-            "-s",
-            str(speed),
-            "-a",
-            "175",
-            "-w",
-            str(wav),
-            spec,
-        ]
-    )
     run(
         [
             "ffmpeg",
@@ -427,6 +462,63 @@ def synth(spec, dest, speed):
         ]
     )
     wav.unlink(missing_ok=True)
+
+
+def synth(spec, dest, speed):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    wav = dest.with_suffix(".wav")
+    run(
+        [
+            "espeak-ng",
+            "-v",
+            "en-us",
+            "-s",
+            str(speed),
+            "-a",
+            "175",
+            "-w",
+            str(wav),
+            spec,
+        ]
+    )
+    to_mp3(wav, dest)
+
+
+def synth_hype(text, dest, speed, pitch):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    wav = dest.with_suffix(".wav")
+    run(
+        [
+            "espeak-ng",
+            "-v",
+            "en-us+f3",
+            "-s",
+            str(speed),
+            "-p",
+            str(pitch),
+            "-a",
+            "180",
+            "-w",
+            str(wav),
+            text,
+        ]
+    )
+    to_mp3(wav, dest)
+
+
+def build_hype():
+    js = (ROOT / "js" / "app.js").read_text(encoding="utf-8")
+    ids = [item[0] for item in HYPE] + ["purr"]
+    missing = [hid for hid in ids if f'"{hid}"' not in js]
+    if missing:
+        sys.exit("js/app.js is missing hype ids: " + ", ".join(missing))
+    HYPE_DIR.mkdir(parents=True, exist_ok=True)
+    for hid, speed, pitch, text in HYPE:
+        synth_hype(text, HYPE_DIR / f"{hid}.mp3", speed, pitch)
+    wav = HYPE_DIR / "purr.wav"
+    write_wav(wav, build_purr())
+    to_mp3(wav, HYPE_DIR / "purr.mp3")
+    print(f"hype: {len(ids)} clips")
 
 
 def check_curriculum():
@@ -478,8 +570,12 @@ def main():
         if "ɔ" in heard or "eɪ" in heard:
             sys.exit(f"sentence {sid}: {heard!r} from {spec}")
         synth(spec, SENT_DIR / f"{sid}.mp3", 118)
+    build_hype()
     print(f"done: {len(PHONEMES)} phonemes, {len(CHUNK)} words, {len(SENTENCES)} sentences")
 
 
 if __name__ == "__main__":
-    main()
+    if "--hype" in sys.argv:
+        build_hype()
+    else:
+        main()

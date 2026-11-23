@@ -23,6 +23,12 @@
     s: ["c", "a"],
     r: ["n", "h"],
   };
+  const HYPE = [
+    "damn", "legend", "omg", "ate", "slay", "iconic", "queen", "insane",
+    "see-you", "no-way", "period", "main", "clean", "respect", "wait",
+    "fire", "screaming", "unreal", "mrrp", "purr",
+  ];
+
   const REVIEW = [
     "sat", "pat", "tap", "pin", "pan", "sit", "nap", "tin", "ant", "mat", "map",
     "dad", "mad", "sad", "sam", "cat", "dog", "cap", "pot", "mop", "sun", "red",
@@ -151,8 +157,24 @@
     return "audio/s/" + id + ".mp3";
   }
 
-  function speaker() {
-    return '<button type="button" class="sound" data-act="hear-current" aria-label="Слушать">' +
+  function hypeSrc(id) {
+    return "audio/hype/" + id + ".mp3";
+  }
+
+  function takeHype(data) {
+    let deck = Array.isArray(data.hypeDeck) ? data.hypeDeck.filter(function (id) {
+      return HYPE.indexOf(id) !== -1;
+    }) : [];
+    if (!deck.length) deck = shuffle(HYPE.slice());
+    const id = deck.pop();
+    data.hypeDeck = deck;
+    return id;
+  }
+
+  function speaker(act) {
+    const replay = act === "hype";
+    return '<button type="button" class="sound" data-act="' + (replay ? "hype" : "hear-current") +
+      '" aria-label="' + (replay ? "Ещё раз" : "Слушать") + '">' +
       '<svg viewBox="0 0 24 24"><path d="M4 10h4l5-4v12l-5-4H4z"/><path d="M16 9a4 4 0 010 6"/><path d="M18 7a7 7 0 010 10"/></svg></button>';
   }
 
@@ -285,10 +307,11 @@
     const prev = (data.steps[state.stepId] && data.steps[state.stepId].done) || [];
     const done = new Set(prev);
     done.add(state.activityIndex);
-    data.steps[state.stepId] = { done: Array.from(done) };
-    save(data);
     const step = stepById(state.stepId);
     const last = state.activityIndex === step.activities.length - 1;
+    if (last) state.hype = takeHype(data);
+    data.steps[state.stepId] = { done: Array.from(done) };
+    save(data);
     if (!last) {
       startActivity(state.stepId, state.activityIndex + 1);
       return;
@@ -297,6 +320,7 @@
     state.summary = state.stepTotal ? state.stepFirst + " из " + state.stepTotal + " сразу" : "";
     stopAudio();
     render();
+    play(hypeSrc(state.hype));
   }
 
   function currentActivity() {
@@ -422,6 +446,8 @@
         localStorage.removeItem(KEY);
         render();
       }
+    } else if (act === "hype") {
+      if (state.hype) play(hypeSrc(state.hype));
     } else if (act === "next-done") {
       const index = steps.indexOf(stepById(state.stepId));
       if (index < steps.length - 1 && stepUnlocked(index + 1)) startActivity(steps[index + 1].id, 0);
@@ -912,7 +938,9 @@
     const text = "Дальше не обязательно сегодня. Один шаг уже занятие.";
     const nextLabel = "Следующий шаг";
     const score = state.summary ? "<p>С первой попытки: " + esc(state.summary) + ".</p>" : "";
-    return '<section class="done center"><p class="kicker">' + esc(step.title) + "</p><h2>" + title + "</h2>" +
+    return '<section class="done center"><p class="kicker">' + esc(step.title) + "</p>" +
+      speaker("hype") +
+      "<h2>" + title + "</h2>" +
       "<p class=\"hint\">" + text + "</p>" + score +
       '<div class="row" style="justify-content:center">' +
       '<button type="button" class="solid" data-act="next-done">' + nextLabel + "</button>" +
